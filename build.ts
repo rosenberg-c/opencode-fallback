@@ -9,7 +9,7 @@ const result = await Bun.build({
 	outdir: "./dist",
 	target: "bun",
 	format: "esm",
-	splitting: true,
+	splitting: false,
 	external: ["@opencode-ai/plugin", "@opencode-ai/sdk", "@opencode/plugin"],
 	define: { __FALLBACK_BUILD_ID__: JSON.stringify(new Date().toISOString()) },
 })

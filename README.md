@@ -11,7 +11,7 @@ Automatic model fallback plugin for [OpenCode](https://github.com/sst/opencode).
 - **Cooldown & auto-recovery** — failed models enter cooldown and the plugin automatically switches back to the primary once it recovers
 - **Custom retryable patterns** — extend the built-in error matching with your own regex patterns
 - **Toast notifications** — optional UI feedback when models are switched, with a v2 CLI companion
-- **Compaction fallback** — retries summary generation on backup models without duplicating the original task
+- **Optional compaction fallback** — opt in to retry summary generation on backup models without duplicating the original task
 
 ---
 
@@ -125,14 +125,16 @@ also loses this plugin's in-memory background delivery jobs; restart when idle.
   durable ledger across cold restarts. When a reloaded generation does not own
   the child, an unchanged idle failure/interruption is observed for 30 seconds
   before being reported, to allow an admitted continuation to start.
-- Compaction uses a dedicated summary hook. Attempts run in temporary native
+- When `compaction_fallback` is enabled, compaction uses a dedicated summary hook. Attempts run in temporary native
   child sessions with the saved structured history, system instructions, and
   request options for the original model; fallback models use their native
   compaction-agent options and output limits. Tools are disabled. Hung attempts are interrupted before
   advancing the chain, and children are removed afterwards. The parent model
   and agent stay selected, and no continuation prompt is appended for compaction.
   `compaction`-specific chains take precedence over the parent agent's chain.
-- Without an available compaction fallback, native retries and slow streaming
+- By default, compaction stays on the running model and does not use the
+  fallback chain; ordinary primary-request fallback still works.
+- When enabled but no compaction fallback is available, native retries and slow streaming
   requests are preserved. Title and transient generation retain native retries.
 - `notify_on_fallback` publishes typed server events to the automatically loaded
   `./tui` companion, which displays CLI toasts. Notifications are never added to
@@ -275,7 +277,11 @@ All fields are optional — omit any you want to keep at the default.
   // Replacement for foreground task calls. Keeps the parent's task
   // promise pending across child retries. Background jobs are unsupported.
   // Default: true. Set false to use OpenCode's native task tool instead.
-  "foreground_task_fallback": true
+  "foreground_task_fallback": true,
+
+  // V2 only: opt in to retry compaction on backup models.
+  // Default: false. Ordinary request fallback is unaffected.
+  "compaction_fallback": false
 }
 ```
 
