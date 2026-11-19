@@ -1,6 +1,6 @@
 import type { Plugin } from "@opencode/plugin"
 import type { Registration } from "@opencode/plugin/promise/registration"
-import { createBackgroundLease, escapeXMLAttribute, startBackgroundSubagent, type NativeTool, type NativeToolContext, type NativeToolResult } from "./v2-background-task"
+import { createBackgroundLease, startBackgroundSubagent, type NativeTool, type NativeToolContext, type NativeToolResult } from "./v2-background-task"
 
 export { readV2ForegroundSubagentOutput } from "./v2-background-task"
 
@@ -11,10 +11,6 @@ export { readV2ForegroundSubagentOutput } from "./v2-background-task"
 export interface V2ForegroundTaskFallback {
 	/** True for a tracked child eligible for or already running fallback. */
 	ownsFallback(sessionID: string): boolean
-	/** The selected model after recovery, when known. */
-	modelFor?(sessionID: string): string | undefined
-	/** Give a retryable native error a chance to become an owned fallback. */
-	waitForOwnership?(sessionID: string, error: unknown, signal: AbortSignal): Promise<boolean>
 	/** True after an observed user interruption, rather than an owned TTFT interrupt. */
 	isCancelled?(sessionID: string): boolean
 	/** Cancel the plugin-owned hand-off synchronously, even while the child is idle. */
@@ -63,9 +59,7 @@ export async function installV2ForegroundTaskFallback(
 				try {
 					return await execute(input, wrappedContext)
 				} catch (error) {
-					if (!childSessionID) throw error
-					if (!coordination.ownsFallback(childSessionID) &&
-						(context.signal.aborted || !await coordination.waitForOwnership?.(childSessionID, error, context.signal))) throw error
+					if (!childSessionID || !coordination.ownsFallback(childSessionID)) throw error
 					const child = childSessionID
 					const cancelChild = () => {
 						coordination.cancelFallback(child)
@@ -89,12 +83,11 @@ export async function installV2ForegroundTaskFallback(
 						context.signal.removeEventListener("abort", cancelChild)
 					}
 					if (context.signal.aborted || !output?.trim()) throw error
-					const model = coordination.modelFor?.(child)
-					const result = { sessionID: child, status: "completed" as const, output }
+					const result = { sessionID: childSessionID, status: "completed" as const, output }
 					return {
 						output: result,
-						content: `<subagent sessionID="${child}" state="completed"${model ? ` model="${escapeXMLAttribute(model)}"` : ""}>\n${output}\n</subagent>`,
-						metadata: { sessionID: child, status: "completed", ...(model ? { model } : {}) },
+						content: `<subagent sessionID="${childSessionID}" state="completed">\n${output}\n</subagent>`,
+						metadata: { sessionID: childSessionID, status: "completed" },
 					} satisfies NativeToolResult
 				}
 			}

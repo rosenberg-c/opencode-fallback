@@ -14,7 +14,7 @@ export type NativeSubagentOutput = {
 export type NativeToolResult = {
 	output: NativeSubagentOutput
 	content: string
-	metadata: { sessionID: string; status: "completed" | "running"; model?: string }
+	metadata: { sessionID: string; status: "completed" | "running" }
 }
 
 export type NativeToolContext = {
@@ -28,7 +28,7 @@ export type NativeTool = {
 }
 
 type Finished =
-	| { state: "completed"; output: string; model?: string }
+	| { state: "completed"; output: string }
 	| { state: "error"; message: string }
 	| { state: "cancelled" }
 
@@ -269,15 +269,14 @@ async function deliverOutcome(
 		if (!finished) return
 		const state = finished.state
 		const body = finished.state === "completed" ? finished.output : finished.state === "error" ? finished.message : "Subagent cancelled."
-		const model = finished.state === "completed" ? finished.model : undefined
-		const attrs = `sessionID="${child}" state="${state}" description="${escapeXMLAttribute(description ?? "")}"${model ? ` model="${escapeXMLAttribute(model)}"` : ""}`
+		const attrs = `sessionID="${child}" state="${state}" description="${escapeXMLAttribute(description ?? "")}"`
 		await deliver(manager, {
 			sessionID: parentID,
 			id: notificationID as never,
 			text: `<subagent ${attrs}>\n${body}\n</subagent>`,
 			// The host accepts an optional string here, not null: omit when absent.
 			...(description !== undefined ? { description } : {}),
-			metadata: { source: "subagent", childID: child, agent, state, "opencode-fallback": true, ...(model ? { model } : {}) },
+			metadata: { source: "subagent", childID: child, agent, state, "opencode-fallback": true },
 			resume: true,
 		})
 	} catch (error) {
@@ -330,10 +329,7 @@ async function finalOutcome(
 	// Decide unowned failures only against a live binding. During a reload gap the
 	// previous owner's state is unknown, so recovery reads the child's session instead.
 	if (active && active === origin && !active.coordination.ownsFallback(child)) {
-		if (isNativeCancellation(nativeError)) return { state: "cancelled" }
-		if (!await active.coordination.waitForOwnership?.(child, nativeError, signal)) {
-			return { state: "error", message }
-		}
+		return isNativeCancellation(nativeError) ? { state: "cancelled" } : { state: "error", message }
 	}
 	return recoverChild(manager, child, signal, message)
 }
@@ -376,7 +372,7 @@ async function recoverChild(
 				continue
 			}
 			if (!output?.trim()) return lease.coordination.isCancelled?.(child) ? { state: "cancelled" } : { state: "error", message }
-			return { state: "completed", output, model: lease.coordination.modelFor?.(child) }
+			return { state: "completed", output }
 		}
 
 		try {
