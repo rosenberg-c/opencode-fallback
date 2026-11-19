@@ -6,6 +6,8 @@ function fixture(options: {
 	background?: boolean
 	throwNative?: boolean
 	owned?: boolean
+	lateOwnership?: boolean
+	model?: string
 	aborted?: boolean
 	fallbackResult?: string
 } = {}) {
@@ -58,6 +60,11 @@ function fixture(options: {
 	const install = installV2ForegroundTaskFallback(ctx, {
 		cancelFallback(sessionID) { calls.push(`cancel:${sessionID}`) },
 		ownsFallback(sessionID) { calls.push(`owns:${sessionID}`); return options.owned ?? false },
+		modelFor() { return options.model },
+		async waitForOwnership(sessionID, error, signal) {
+			calls.push(`ownership:${sessionID}:${signal.aborted}`)
+			return options.lateOwnership ?? false
+		},
 		async waitForFallback(sessionID, signal) {
 			calls.push(`wait:${sessionID}:${signal.aborted}`)
 			return options.fallbackResult
@@ -96,6 +103,16 @@ describe("v2 native foreground subagent fallback result delivery", () => {
 			metadata: { sessionID: "child", status: "completed" },
 		})
 		expect(f.calls).toEqual(["owns:child", "wait:child:false"])
+	})
+
+	test("waits for a late fallback owner and reports the model that completed the child", async () => {
+		const f = fixture({ throwNative: true, lateOwnership: true, fallbackResult: "recovered answer", model: "opencode/beam-free" })
+		expect(await f.execute()).toEqual({
+			output: { sessionID: "child", status: "completed", output: "recovered answer" },
+			content: '<subagent sessionID="child" state="completed" model="opencode/beam-free">\nrecovered answer\n</subagent>',
+			metadata: { sessionID: "child", status: "completed", model: "opencode/beam-free" },
+		})
+		expect(f.calls).toEqual(["owns:child", "ownership:child:false", "wait:child:false"])
 	})
 
 	test("preserves native errors when the child is not owned or fallback has no result", async () => {

@@ -48,8 +48,10 @@ let directoryCounter = 0
 function harness(options: {
 	run?: (input: any, context: any) => Promise<unknown>
 	owned?: (sessionID: string) => boolean
+	model?: string
 	cancelled?: (sessionID: string) => boolean
 	waitForFallback?: (sessionID: string, signal: AbortSignal) => Promise<string | undefined>
+	waitForOwnership?: (sessionID: string, error: unknown, signal: AbortSignal) => Promise<boolean>
 	info?: () => unknown
 	messages?: unknown[]
 	directory?: string
@@ -107,6 +109,8 @@ function harness(options: {
 	const install = installV2ForegroundTaskFallback(ctx, {
 		cancelFallback(sessionID) { cancels.push(sessionID) },
 		ownsFallback(sessionID) { return options.owned?.(sessionID) ?? false },
+		modelFor() { return options.model },
+		waitForOwnership(sessionID, error, signal) { return options.waitForOwnership?.(sessionID, error, signal) ?? Promise.resolve(false) },
 		isCancelled(sessionID) { return options.cancelled?.(sessionID) ?? false },
 		async waitForFallback(sessionID, signal) {
 			return options.waitForFallback?.(sessionID, signal)
@@ -277,6 +281,7 @@ describe("v2 background subagent fallback delivery", () => {
 				throw new Error("Rate limited (sessionID: child)")
 			},
 			owned: () => true,
+			model: "opencode/beam-free",
 			waitForFallback: () => fallback.promise,
 		})
 		const { result } = await h.run(backgroundInput())
@@ -290,9 +295,41 @@ describe("v2 background subagent fallback delivery", () => {
 		expect(h.synthetic).toHaveLength(1)
 		expect(h.synthetic[0]).toMatchObject({
 			sessionID: "parent",
-			text: '<subagent sessionID="child" state="completed" description="Read docs">\nrecovered answer\n</subagent>',
+			text: '<subagent sessionID="child" state="completed" description="Read docs" model="opencode/beam-free">\nrecovered answer\n</subagent>',
 			resume: true,
-			metadata: { source: "subagent", childID: "child", agent: "explore", state: "completed", "opencode-fallback": true },
+			metadata: { source: "subagent", childID: "child", agent: "explore", state: "completed", "opencode-fallback": true, model: "opencode/beam-free" },
+		})
+	})
+
+	test("waits for late ownership rather than telling the parent a retryable failure is final", async () => {
+		const childFailed = deferred<void>()
+		const ownership = deferred<boolean>()
+		const fallback = deferred<string | undefined>()
+		let owned = false
+		const h = harness({
+			async run(_input, context) {
+				await context.progress({ sessionID: "child" })
+				await childFailed.promise
+				throw new Error("You've used today's free messages.")
+			},
+			owned: () => owned,
+			waitForOwnership: () => ownership.promise,
+			waitForFallback: () => fallback.promise,
+			model: "opencode/beam-free",
+		})
+		await (await h.run(backgroundInput())).result
+		childFailed.resolve()
+		await flush()
+		expect(h.synthetic).toEqual([])
+		owned = true
+		ownership.resolve(true)
+		await flush()
+		expect(h.synthetic).toEqual([])
+		fallback.resolve("recovered answer")
+		await until(() => h.synthetic.length === 1, "late recovered notification")
+		expect(h.synthetic[0]).toMatchObject({
+			text: '<subagent sessionID="child" state="completed" description="Read docs" model="opencode/beam-free">\nrecovered answer\n</subagent>',
+			metadata: { state: "completed", model: "opencode/beam-free" },
 		})
 	})
 

@@ -73,6 +73,15 @@ describe("error-classifier", () => {
 				const error = { message: "API quota exceeded for this project" }
 				expect(isRetryableError(error, DEFAULT_CONFIG.retry_on_errors)).toBe(true)
 			})
+
+			test("#then retries exhausted daily free messages without an HTTP status", () => {
+				for (const message of [
+					"You've used today's free messages. They reset at 1:47 AM.",
+					"You’ve used today’s free messages. They reset at 1:47 AM.",
+				]) {
+					expect(isRetryableError({ message }, DEFAULT_CONFIG.retry_on_errors)).toBe(true)
+				}
+			})
 		})
 
 		describe("#when error has quota protection messages", () => {

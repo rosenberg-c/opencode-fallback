@@ -444,6 +444,24 @@ export async function setupV2(ctx: Plugin.Context) {
 		}
 		if (config.foreground_task_fallback) {
 			registrations.push(await installV2ForegroundTaskFallback(ctx, {
+				modelFor: (sessionID) => {
+					const state = states.get(sessionID)
+					return state?.fallback.attemptCount ? state.fallback.currentModel : undefined
+				},
+				async waitForOwnership(sessionID, error, signal) {
+					const initial = states.get(sessionID)
+					// Native subagent errors may omit the provider's retryable details.
+					const eligible = initial?.requestKind === "primary" && chain(initial.agent).length > 0
+					if (!eligible && !isRetryableError(error, config.retry_on_errors, config.retryable_error_patterns)) return false
+					const deadline = Date.now() + 1000
+					while (!signal.aborted && !disposed && Date.now() < deadline) {
+						const state = states.get(sessionID)
+						if (state?.pending || state?.dispatch || (state?.fallback.attemptCount ?? 0) > 0) return true
+						if (state?.cancelled || state?.recoveryFailed || (state && !chain(state.agent).length)) return false
+						try { await sleep(50, undefined, { signal }) } catch { return false }
+					}
+					return false
+				},
 				isCancelled: (sessionID) => states.get(sessionID)?.cancelled === true,
 				cancelFallback: (sessionID) => {
 					compaction?.cancel(sessionID)
